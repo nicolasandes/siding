@@ -11,8 +11,9 @@ When production breaks in the middle of a feature, you don't stash anything.
 You put the feature on a siding and open a new one. It's still there when you
 come back, agent session and all.
 
-Nothing here is tied to a particular workspace. One file — `~/.siding.env` —
-says where your repos live; everything else is generic.
+Nothing here is tied to a particular workspace. **Profiles** say where your
+repos live and which GitHub identity belongs to them — one for work, one for
+personal, each its own tmux session.
 
 ## Install
 
@@ -125,6 +126,48 @@ The underlying `ws*` functions remain as shortcuts:
 | `wsdoctor` | check the whole setup on this machine |
 
 The docker commands are inert without docker; everything else still works.
+
+## Profiles and GitHub identity
+
+Work and personal live in separate workspaces, each with its own tmux session:
+
+```sh
+siding profile list
+siding ws work        # ~/dev/... , acts as your work GitHub account
+siding ws personal    # ~/personal, acts as your personal account
+```
+
+Entering a workspace switches the **gh** account to match, and the status bar
+shows which account the session is acting as. That matters because git identity
+can be routed by path (`includeIf` in `~/.gitconfig`) but **`gh`'s active
+account is global and knows nothing about directories** — which is exactly how
+you push to a personal repo as your work account and get a misleading
+`ERROR: Repository not found`.
+
+`siding doctor` verifies the whole chain for the active profile: gh account,
+the email git actually resolves to inside the workspace, and the host remotes
+resolve to *after* any `insteadOf` rewriting.
+
+```sh
+siding whoami         # profile, gh account, git email, remote host
+```
+
+### Setting it up on a new machine
+
+The path-based git routing is not something you have to rebuild by hand:
+
+```sh
+siding profile add personal \
+  --root ~/personal --gh my-personal-account \
+  --email me@personal.example --ssh-host github.com-personal \
+  --wire --keygen
+```
+
+`--wire` writes the `includeIf` block in `~/.gitconfig`, a `~/.gitconfig-<name>`
+holding the email plus `insteadOf` rules pinning every URL in that tree to the
+right SSH host, and the matching `~/.ssh/config` alias. `--keygen` creates the
+key and prints the one command needed to register it. Idempotent, and it backs
+up anything it edits.
 
 ## Why the dev stack follows the worktree
 

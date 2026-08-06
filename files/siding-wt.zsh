@@ -7,9 +7,18 @@
 #
 # Sourced from ~/.zshrc. Run `wsdoctor` if anything misbehaves.
 
-[[ -f "$HOME/.siding.env" ]] && source "$HOME/.siding.env"   # per-machine: WS_ROOT, WS_NAME
+# Per-machine settings. Profiles first (one workspace + identity each), falling
+# back to the single-workspace file from before profiles existed.
+if [[ -d "$HOME/.siding/profiles" ]]; then
+  _sd=$([[ -f "$HOME/.siding/default" ]] && cat "$HOME/.siding/default" || print -r -- work)
+  [[ -f "$HOME/.siding/profiles/$_sd.env" ]] && { source "$HOME/.siding/profiles/$_sd.env"; export SIDING_PROFILE=$_sd }
+  unset _sd
+elif [[ -f "$HOME/.siding.env" ]]; then
+  source "$HOME/.siding.env"
+fi
 export WS_ROOT="${WS_ROOT:-$HOME/dev}"
 export WS_NAME="${WS_NAME:-${WS_ROOT:t}}"
+export WS_GH WS_EMAIL WS_SSH_HOST
 
 _ws_wtbase() { print -r -- "$WS_ROOT/.claude/worktrees"; }
 
@@ -38,7 +47,7 @@ _ws_repo() {
 }
 
 # The remote's default branch (main here, master for legacy-app and
-# legacy-report) — read from origin/HEAD, never from the local checkout.
+# delivery_report) — read from origin/HEAD, never from the local checkout.
 _ws_base_branch() {
   local p=$1 b
   b=$(git -C "$p" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) \
@@ -527,6 +536,34 @@ wsdoctor() {
   (( stale )) && note "$stale worktree(s) older than 14 days — wswip to review" \
               || pass "no stale worktrees"
 
+
+  # identity — the thing that fails silently and is only noticed on a push
+  if [[ -n "$SIDING_PROFILE" ]]; then
+    pass "profile $SIDING_PROFILE"
+    if [[ -n "$WS_GH" ]] && command -v gh >/dev/null 2>&1; then
+      local active; active=$(gh api user --jq .login 2>/dev/null)
+      if [[ "$active" == "$WS_GH" ]]; then pass "gh account $active matches profile"
+      else note "gh is $active but this profile is $WS_GH — siding ws $SIDING_PROFILE"; fi
+    fi
+    # Does git actually resolve to this identity inside the workspace? Ask git
+    # rather than assume: insteadOf rules rewrite silently.
+    local probe; probe=$(command ls -d "$WS_ROOT"/*/.git(N) "$WS_ROOT"/apps/*/.git(N) 2>/dev/null | head -1)
+    if [[ -n "$probe" ]]; then
+      local rd=${probe:h}
+      local e; e=$(git -C "$rd" config user.email 2>/dev/null)
+      if [[ -z "$e" ]]; then note "git has no email in $WS_ROOT — check ~/.gitconfig includeIf"
+      elif [[ -n "$WS_EMAIL" && "$e" != "$WS_EMAIL" ]]; then
+        fail "git email in workspace is $e, profile expects $WS_EMAIL"
+      else pass "git identity $e"; fi
+      local url; url=$(git -C "$rd" ls-remote --get-url origin 2>/dev/null)
+      local host=${${url#*@}%%:*}
+      if [[ -n "$WS_SSH_HOST" && -n "$host" && "$host" != "$WS_SSH_HOST" ]]; then
+        fail "remotes resolve to $host, profile expects $WS_SSH_HOST"
+      elif [[ -n "$host" ]]; then pass "remotes resolve to $host"; fi
+    fi
+  else
+    note "no profile loaded — siding profile list"
+  fi
   print -r -- ""
   print -r -- "  ${G}$ok ok${O}   ${Y}$warn warn${O}   ${R}$bad fail${O}"
   print -r -- ""
@@ -551,6 +588,16 @@ siding() {
     logs)        wslogs "$@" ;;
     task)        wstask "$@" ;;
     attach)      ws ;;
+    ws|workspace) sidingws "$@" ;;
+    profile)
+      case "${1:-list}" in
+        list|"")  sidingprofile_list ;;
+        show)     sidingprofile_load "${2:-}" && sidingwhoami ;;
+        use)      [[ -n "$2" ]] && { print -r -- "$2" > "$(_siding_dir)/default"; print -r -- "default profile → $2" } ;;
+        add)      shift; sidingprofile_add "$@" ;;
+        *)        print -u2 "siding profile: list | show <name> | use <name> | add <name> …" ; return 1 ;;
+      esac ;;
+    whoami)      sidingwhoami "$@" ;;
     dir)         wsdir "$@" ;;
     theme)       ghtheme "$@" ;;
     doctor)      wsdoctor ;;
@@ -570,6 +617,9 @@ siding() {
       print -r -- "  ${A}console${O} <task|main> <repo>  rails console in the container serving it"
       print -r -- "  ${A}logs${O} <repo>                 follow the app logs"
       print -r -- ""
+      print -r -- "  ${A}ws${O} <profile>                switch workspace (work / personal)"
+      print -r -- "  ${A}profile${O} list|show|use|add     workspaces and their GitHub identities"
+      print -r -- "  ${A}whoami${O}                      which identity is active here"
       print -r -- "  ${A}attach${O}                      back to the workspace session"
       print -r -- "  ${A}dir${O} [path]                  give any directory its own session"
       print -r -- "  ${A}agent${O}                       start an agent at the workspace root"
@@ -581,4 +631,196 @@ siding() {
       ;;
     *) print -u2 "siding: unknown command '$cmd' — try: siding help"; return 1 ;;
   esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profiles — one workspace per identity
+#
+# Each profile is a workspace root plus the GitHub identity that belongs to it.
+# Work and personal get their own tmux session, so they are never one keystroke
+# apart, and the active gh account follows whichever you are in.
+#
+# git identity is already decided by path (~/.gitconfig includeIf), so siding
+# does not set it — it verifies it. The gh CLI is the gap: its active account is
+# GLOBAL and knows nothing about directories, which is precisely how you end up
+# pushing as the wrong account and getting "Repository not found".
+# ─────────────────────────────────────────────────────────────────────────────
+
+_siding_dir()      { print -r -- "$HOME/.siding"; }
+_siding_profdir()  { print -r -- "$HOME/.siding/profiles"; }
+_siding_default()  { [[ -f "$(_siding_dir)/default" ]] && cat "$(_siding_dir)/default" || print -r -- work; }
+
+# Load a profile into the current shell.
+sidingprofile_load() {
+  local name=${1:-$(_siding_default)}
+  local f="$(_siding_profdir)/$name.env"
+  [[ -f "$f" ]] || { print -u2 "siding: no profile '$name' (siding profile list)"; return 1 }
+  unset WS_ROOT WS_NAME WS_GH WS_EMAIL WS_SSH_HOST
+  source "$f"
+  export WS_ROOT WS_NAME WS_GH WS_EMAIL WS_SSH_HOST
+  export SIDING_PROFILE=$name
+}
+
+sidingprofile_list() {
+  local d f n cur
+  cur=$(_siding_default)
+  printf "  %-12s %-34s %-22s %s\n" PROFILE WORKSPACE "GITHUB ACCOUNT" ""
+  for f in "$(_siding_profdir)"/*.env(N); do
+    n=${${f:t}%.env}
+    ( source "$f"; printf "  %-12s %-34s %-22s %s\n" "$n" "${WS_ROOT/#$HOME/~}" "${WS_GH:-—}" "$([[ $n == $cur ]] && print default)" )
+  done
+}
+
+# siding ws <profile> — attach to that workspace, switching gh with it.
+sidingws() {
+  local name=${1:-$(_siding_default)}
+  sidingprofile_load "$name" || return 1
+
+  # gh's active account is global. Switching on attach is the whole point: the
+  # account matches whatever workspace is in front of you.
+  if [[ -n "$WS_GH" ]] && command -v gh >/dev/null 2>&1; then
+    local now; now=$(gh api user --jq .login 2>/dev/null)
+    if [[ "$now" != "$WS_GH" ]]; then
+      gh auth switch --user "$WS_GH" >/dev/null 2>&1 \
+        && print -r -- "gh → $WS_GH" \
+        || print -u2 "siding: could not switch gh to $WS_GH (gh auth login --user $WS_GH)"
+    fi
+  fi
+
+  tmux new-session -A -s "$WS_NAME" -n home -c "$WS_ROOT" "$HOME/.siding-home.zsh" \; \
+       set -t "$WS_NAME" @gh "${WS_GH:-?}" \; \
+       set -t "$WS_NAME" @profile "$name"
+}
+
+# Identity check for one repo: does what git will actually DO here match the
+# profile? Compares the effective email and the host the remote resolves to,
+# after all insteadOf rewriting — which is where the surprises live.
+sidingwhoami() {
+  local dir=${1:-$PWD}
+  local email host remote
+  email=$(git -C "$dir" config user.email 2>/dev/null)
+  remote=$(git -C "$dir" ls-remote --get-url origin 2>/dev/null)
+  host=${${remote#*@}%%:*}
+  print -r -- "  profile      ${SIDING_PROFILE:-none}"
+  print -r -- "  workspace    $WS_ROOT"
+  print -r -- "  gh account   $(command -v gh >/dev/null && gh api user --jq .login 2>/dev/null || print -- '—')"
+  print -r -- "  git email    ${email:-<unset>}"
+  print -r -- "  remote host  ${host:-<no remote>}"
+  [[ -n "$WS_EMAIL" && -n "$email" && "$email" != "$WS_EMAIL" ]] \
+    && print -r -- "  ${email:+⚠ email does not match this profile ($WS_EMAIL)}"
+  [[ -n "$WS_SSH_HOST" && -n "$host" && "$host" != "$WS_SSH_HOST" ]] \
+    && print -r -- "  ⚠ remote resolves to $host, profile expects $WS_SSH_HOST"
+  return 0
+}
+
+# siding profile add <name> --root <dir> --gh <account> --email <addr>
+#                          [--ssh-host <alias>] [--wire] [--keygen]
+#
+# --wire is the answer to "do I have to redo the gitconfig on every machine".
+# It writes the path-based routing itself: an includeIf block in ~/.gitconfig,
+# a ~/.gitconfig-<name> holding the email and the insteadOf rules that pin every
+# URL in that tree to the right SSH host, and the matching ~/.ssh/config alias.
+# Idempotent, and it backs up anything it edits.
+sidingprofile_add() {
+  local name=$1; shift 2>/dev/null
+  local root gh email sshhost wire=0 keygen=0
+  while (( $# )); do
+    case "$1" in
+      --root)     root=${2:A}; shift 2 ;;
+      --gh)       gh=$2; shift 2 ;;
+      --email)    email=$2; shift 2 ;;
+      --ssh-host) sshhost=$2; shift 2 ;;
+      --wire)     wire=1; shift ;;
+      --keygen)   keygen=1; wire=1; shift ;;
+      *) print -u2 "unknown option: $1"; return 1 ;;
+    esac
+  done
+  if [[ -z "$name" || -z "$root" ]]; then
+    print -u2 "usage: siding profile add <name> --root <dir> [--gh acct] [--email addr] [--ssh-host alias] [--wire] [--keygen]"
+    return 1
+  fi
+  [[ -d "$root" ]] || { print -u2 "no such directory: $root"; return 1 }
+  : ${sshhost:=github.com-$name}
+
+  mkdir -p "$(_siding_profdir)"
+  cat > "$(_siding_profdir)/$name.env" <<EOF
+# siding profile: $name
+WS_ROOT="${root/#$HOME/\$HOME}"
+WS_NAME="$name"
+WS_GH="$gh"
+WS_EMAIL="$email"
+WS_SSH_HOST="$sshhost"
+EOF
+  print -r -- "profile $name → $root"
+
+  (( wire )) || { print -r -- "  (run with --wire to also set up git/ssh identity routing)"; return 0 }
+
+  local stamp; stamp=$(date +%Y%m%d-%H%M%S)
+  local key="$HOME/.ssh/id_ed25519_$name"
+
+  # ssh alias
+  if [[ "$sshhost" != "github.com" ]]; then
+    if grep -q "^[[:space:]]*Host[[:space:]]\+$sshhost\b" "$HOME/.ssh/config" 2>/dev/null; then
+      print -r -- "  ssh: Host $sshhost already defined"
+    else
+      [[ -f "$HOME/.ssh/config" ]] && cp "$HOME/.ssh/config" "$HOME/.ssh/config.bak-$stamp"
+      mkdir -p "$HOME/.ssh"
+      cat >> "$HOME/.ssh/config" <<EOF
+
+# $name (added by siding)
+Host $sshhost
+  HostName github.com
+  User git
+  IdentityFile $key
+EOF
+      chmod 600 "$HOME/.ssh/config"
+      print -r -- "  ssh: added Host $sshhost → $key"
+    fi
+  fi
+
+  # per-identity gitconfig
+  local gcf="$HOME/.gitconfig-$name"
+  if [[ -f "$gcf" ]]; then
+    print -r -- "  git: $gcf already exists"
+  else
+    cat > "$gcf" <<EOF
+[user]
+	name = $(git config --global user.name 2>/dev/null || print -r -- "$USER")
+	email = $email
+
+# Every remote under this tree is pinned to the $name key. Rewrites away from
+# the other host too, so a URL pasted from the wrong place self-corrects.
+[url "git@$sshhost:"]
+	insteadOf = git@github.com:
+	insteadOf = https://github.com/
+EOF
+    print -r -- "  git: wrote $gcf"
+  fi
+
+  # includeIf block
+  local relroot="${root/#$HOME/~}"
+  if grep -q "gitdir/i:$relroot/" "$HOME/.gitconfig" 2>/dev/null; then
+    print -r -- "  git: ~/.gitconfig already routes $relroot/"
+  else
+    cp "$HOME/.gitconfig" "$HOME/.gitconfig.bak-$stamp" 2>/dev/null
+    cat >> "$HOME/.gitconfig" <<EOF
+
+[includeIf "gitdir/i:$relroot/"]
+	path = ~/.gitconfig-$name
+EOF
+    print -r -- "  git: ~/.gitconfig routes $relroot/ → ~/.gitconfig-$name"
+  fi
+
+  # key
+  if (( keygen )); then
+    if [[ -f "$key" ]]; then
+      print -r -- "  ssh: key $key already exists"
+    else
+      ssh-keygen -t ed25519 -f "$key" -N "" -C "$email" -q
+      print -r -- "  ssh: generated $key"
+    fi
+    print -r -- ""
+    print -r -- "  add this key to the $gh account:"
+    print -r -- "    gh auth switch --user $gh && gh ssh-key add $key.pub --title \"\$(hostname) $name\""
+  fi
 }

@@ -2,8 +2,8 @@
 # What Ghostty runs. Attaches to the workspace session, creating it the first
 # time, then falls through to a plain login shell so ⌥d leaves you somewhere
 # usable instead of closing the window.
-[[ -f "$HOME/.siding.env" ]] && source "$HOME/.siding.env"
-: ${WS_ROOT:=$HOME/dev/myworkspace}
-: ${WS_NAME:=myworkspace}
-tmux new-session -A -s "$WS_NAME" -n home -c "$WS_ROOT" "$HOME/.siding-home.zsh"
+# Ghostty passes no arguments, so this opens the default profile. `siding ws
+# <name>` switches once you are inside.
+source "$HOME/.siding-wt.zsh"
+sidingws "${1:-}"
 exec /bin/zsh -l
