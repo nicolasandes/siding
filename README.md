@@ -129,28 +129,46 @@ The docker commands are inert without docker; everything else still works.
 
 ## Profiles and GitHub identity
 
-Work and personal live in separate workspaces, each with its own tmux session:
+A **profile** is a workspace root plus the GitHub identity that belongs to it.
+Add as many as you have identities — work, personal, a client, an org you
+contribute to. Each gets its own tmux session.
 
 ```sh
 siding profile list
-siding ws work        # ~/dev/... , acts as your work GitHub account
-siding ws personal    # ~/personal, acts as your personal account
+siding ws work           # attach to that workspace
+siding ws personal
+siding ws acme
+siding profile use work  # which one Ghostty opens by default
+siding whoami            # profile, gh account, git email, remote host
 ```
 
-Entering a workspace switches the **gh** account to match, and the status bar
-shows which account the session is acting as. That matters because git identity
-can be routed by path (`includeIf` in `~/.gitconfig`) but **`gh`'s active
-account is global and knows nothing about directories** — which is exactly how
-you push to a personal repo as your work account and get a misleading
-`ERROR: Repository not found`.
-
-`siding doctor` verifies the whole chain for the active profile: gh account,
-the email git actually resolves to inside the workspace, and the host remotes
-resolve to *after* any `insteadOf` rewriting.
+Profiles are plain files in `~/.siding/profiles/<name>.env`, so you can also
+write one by hand or keep them in your own dotfiles:
 
 ```sh
-siding whoami         # profile, gh account, git email, remote host
+WS_ROOT="$HOME/clients/acme"      # directory holding the checkouts
+WS_NAME="acme"                    # tmux session name
+WS_GH="me-at-acme"                # gh switches to this on entry
+WS_EMAIL="me@acme.example"        # what git should be using here
+WS_SSH_HOST="github.com-acme"     # host remotes must resolve to
 ```
+
+`~/.siding/default` holds the name of the profile Ghostty opens.
+
+### Why this exists
+
+Entering a workspace switches the **gh** account to match, and the status bar
+shows which account the session is acting as.
+
+That matters because the two halves of GitHub identity behave differently. git
+can be routed per-directory with `includeIf` in `~/.gitconfig`, but **`gh`'s
+active account is global and knows nothing about directories.** The mismatch is
+silent until a push returns `ERROR: Repository not found` — which reads as *the
+repo does not exist* when it means *wrong account*.
+
+`siding doctor` verifies the whole chain for the active profile: the gh account,
+the email git actually resolves to inside the workspace, and the host remotes
+resolve to *after* any `insteadOf` rewriting.
 
 ### Setting it up on a new machine
 
@@ -161,7 +179,14 @@ siding profile add personal \
   --root ~/personal --gh my-personal-account \
   --email me@personal.example --ssh-host github.com-personal \
   --wire --keygen
+
+siding profile add acme \
+  --root ~/clients/acme --gh me-at-acme \
+  --email me@acme.example --wire --keygen
 ```
+
+Repeat per identity — there is no limit, and nothing is special-cased about
+"work" or "personal"; they are just the names in the examples.
 
 `--wire` writes the `includeIf` block in `~/.gitconfig`, a `~/.gitconfig-<name>`
 holding the email plus `insteadOf` rules pinning every URL in that tree to the

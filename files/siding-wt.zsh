@@ -46,7 +46,7 @@ _ws_repo() {
   return 1
 }
 
-# The remote's default branch (main here, master for legacy-app and
+# The remote's default branch (main here, master for alex_hr_app and
 # delivery_report) — read from origin/HEAD, never from the local checkout.
 _ws_base_branch() {
   local p=$1 b
