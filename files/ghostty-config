@@ -1,0 +1,44 @@
+# Ghostty — boots straight into the myworkspace workspace.
+#
+# Opening Ghostty attaches to the tmux session named "myworkspace", creating it
+# the first time. Everything you had open is still there, including Claude,
+# because tmux kept it running while the window was closed.
+#
+# ⌥r open a repo   ⌥x close it   ⌥d detach to a plain shell
+
+# Session named myworkspace, not alex — "alex" collides with a real repository
+# name and showed up in titles and session menus as if it were one.
+# Attach to the workspace, then fall through to a normal login shell.
+#
+# The trailing `exec zsh` matters: without it, detaching (⌥d) ends the command
+# and Ghostty closes the window, so there was no way to get a plain terminal.
+# Now ⌥d leaves you at an ordinary prompt in the same window — cd anywhere,
+# personal projects included — and `ax` takes you back to the workspace.
+command = /bin/zsh -lc "exec $HOME/.siding-launch.zsh"
+
+# A closed window is not a lost session here — tmux owns the processes — so the
+# confirmation prompt is just friction.
+confirm-close-surface = false
+
+# ── Look ─────────────────────────────────────────────────────────────────────
+# Swap the theme by changing this one line, then reload with ⌘⇧, (or run
+# `ghtheme <name>` in a shell). `ghostty +list-themes` shows all 463.
+theme = Hipster Green
+
+# No background/foreground/cursor overrides here on purpose. Each theme brings
+# its own, and pinning any of them would freeze that colour across every future
+# `ghtheme` switch.
+
+# Noticeably see-through, with blur so what shows through becomes soft colour
+# rather than competing detail. Blur is what keeps text legible at this opacity.
+background-opacity = 0.85
+background-blur = 20
+
+cursor-style = block
+cursor-style-blink = true
+mouse-hide-while-typing = true
+
+window-padding-x = 8
+window-padding-y = 6
+font-size = 13
+macos-option-as-alt = true
