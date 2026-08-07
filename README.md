@@ -115,6 +115,8 @@ One entry point, `siding <command>` — run `siding help` for the list:
 | `siding logs <repo>` | follow the app logs |
 | `siding attach` / `siding dir [path]` | back to the workspace / any directory its own session |
 | `siding theme [name]` | switch the Ghostty theme |
+| `siding init` | scaffold a workspace layer in the root |
+| `siding inventory [--write]` | regenerate the repo table from disk |
 | `siding doctor` | check this machine |
 
 The underlying `ws*` functions remain as shortcuts:
@@ -291,6 +293,28 @@ scripts themselves), and backs up what it touched.
 | `~/.siding-home.zsh` | the banner you land on |
 | `~/.siding-launch.zsh` | what Ghostty runs |
 | `~/.tmux.conf`, `~/.config/ghostty/config` | |
+
+## The workspace layer
+
+`siding init` scaffolds the root of a workspace: a `CLAUDE.md` describing it, a
+`PRINCIPLES.md`, a `decisions/` directory for dated one-file-per-decision
+records, `skills/` and `scripts/`, and a `.gitignore` that tracks only this
+layer — project directories are ignored by pattern, so cloning a new one needs
+no maintenance.
+
+The repo table is **generated**:
+
+```sh
+siding inventory --write
+```
+
+It lists what is actually on disk, plus what exists on the profile's GitHub
+account but is not cloned here. It refuses to produce that second list when gh
+is signed in as a different account, because a confidently short list reads as
+"these are all missing" when it means "I could not see the private ones".
+
+Generating it is the point. A hand-maintained inventory drifts, and tooling that
+reads a stale one fails silently rather than loudly.
 
 ## Prior art
 

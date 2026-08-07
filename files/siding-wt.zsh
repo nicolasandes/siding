@@ -613,6 +613,8 @@ siding() {
         *)        print -u2 "siding profile: list | show <name> | use <name> | add <name> …" ; return 1 ;;
       esac ;;
     whoami)      sidingwhoami "$@" ;;
+    init)        sidinginit "$@" ;;
+    inventory)   sidinginventory "$@" ;;
     dir)         wsdir "$@" ;;
     theme)       ghtheme "$@" ;;
     doctor)      wsdoctor ;;
@@ -641,6 +643,8 @@ siding() {
       print -r -- "  ${A}dir${O} [path]                  give any directory its own session"
       print -r -- "  ${A}agent${O}                       start an agent at the workspace root"
       print -r -- "  ${A}theme${O} [name]                switch the Ghostty theme"
+      print -r -- "  ${A}init${O}                        scaffold the workspace layer (CLAUDE.md, principles, decisions)"
+      print -r -- "  ${A}inventory${O} [--write]         regenerate the repo table from disk"
       print -r -- "  ${A}doctor${O}                      check this machine"
       print -r -- ""
       print -r -- "  ${D}ws* shortcuts also work: wsnew, wswip, wsdone, wsup, wsconsole …${O}"
@@ -1076,4 +1080,171 @@ wsdowniso() {
   (cd "$dir" && docker compose -p "$proj" -f "$(_ws_compose_file "$dir")" -f "$ov" down --remove-orphans 2>&1 | tail -2)
   rm -f "$(_ws_statedir)/iso-$proj" "$ov"
   print -r -- "→ $proj down"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workspace scaffolding
+#
+# A workspace root that documents itself. The inventory is GENERATED, never
+# hand-written: a hand-maintained list of what lives here is the thing that goes
+# stale, and when tooling reads it, stale means silently broken rather than
+# merely wrong.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_siding_repo_row() {
+  local d=$1 name lang last rem
+  name=${d:t}
+  lang=$(ls "$d" 2>/dev/null | grep -m1 -iE '^(package\.json|Gemfile|go\.mod|Cargo\.toml|requirements\.txt|pyproject\.toml|pubspec\.yaml|composer\.json)$')
+  case "$lang" in
+    package.json) lang="node" ;; Gemfile) lang="ruby" ;; go.mod) lang="go" ;;
+    Cargo.toml) lang="rust" ;; requirements.txt|pyproject.toml) lang="python" ;;
+    pubspec.yaml) lang="flutter" ;; composer.json) lang="php" ;; *) lang="—" ;;
+  esac
+  last=$(git -C "$d" log -1 --format=%as 2>/dev/null)
+  rem=$(git -C "$d" remote get-url origin 2>/dev/null | sed -E 's|\.git$||; s|.*[:/]([^/]+/[^/]+)$|\1|')
+  print -r -- "| \`$name\` | $lang | ${rem:-—} | ${last:-—} |"
+}
+
+# sidinginventory [--write] — the table of what is actually here.
+sidinginventory() {
+  local write=0; [[ "$1" == "--write" ]] && write=1
+  local -a rows
+  local d
+  for d in "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
+    [[ -e "$d/.git" ]] || continue
+    rows+=("$(_siding_repo_row "$d")")
+  done
+
+  local out=""
+  out+="| repo | stack | remote | last commit |"$'\n'
+  out+="|---|---|---|---|"$'\n'
+  local r; for r in "${rows[@]}"; do out+="$r"$'\n'; done
+
+  # Repos that exist on the account but are not cloned here. Knowing what is
+  # missing is as useful as knowing what is present, and it is the half a
+  # hand-written table never captures.
+  if [[ -n "$WS_GH" ]] && command -v gh >/dev/null 2>&1; then
+    # Only ask when gh is actually signed in as this profile's account. Another
+    # account can see just the public repos, and a confidently short list is
+    # worse than none — it reads as "these are all missing" when it means
+    # "I could not see the private ones".
+    local active; active=$(gh api user --jq .login 2>/dev/null)
+    if [[ "$active" == "$WS_GH" ]]; then
+      local -a absent
+      local n
+      for n in $(gh repo list "$WS_GH" --limit 200 --json name --jq '.[].name' 2>/dev/null); do
+        [[ -e "$WS_ROOT/$n/.git" ]] || absent+=("$n")
+      done
+      if (( ${#absent} )); then
+        local list=""
+        for n in "${absent[@]}"; do list+="\`$n\`, "; done
+        out+=$'\n'"On \`$WS_GH\` but not cloned here: ${list%, }"$'\n'
+      fi
+    else
+      out+=$'\n'"_Not-cloned list skipped: gh is signed in as \`$active\`, not \`$WS_GH\` (\`siding ws\` switches it)._"$'\n'
+    fi
+  fi
+
+  if (( write )); then
+    local f="$WS_ROOT/CLAUDE.md"
+    [[ -f "$f" ]] || { print -u2 "sidinginventory: no $f — run siding init first"; return 1 }
+    python3 - "$f" <<PYEOF
+import re, sys
+path = sys.argv[1]
+body = """$out"""
+s = open(path).read()
+new = "<!-- siding:inventory:start -->\n" + body + "<!-- siding:inventory:end -->"
+if "siding:inventory:start" in s:
+    s = re.sub(r"<!-- siding:inventory:start -->.*?<!-- siding:inventory:end -->", new, s, flags=re.S)
+else:
+    s = s.rstrip() + "\n\n" + new + "\n"
+open(path, "w").write(s)
+print("  inventory written to CLAUDE.md")
+PYEOF
+  else
+    print -r -- "$out"
+  fi
+}
+
+# sidinginit — scaffold the workspace layer in WS_ROOT.
+sidinginit() {
+  local root=${1:-$WS_ROOT}
+  [[ -d "$root" ]] || { print -u2 "sidinginit: no such directory: $root"; return 1 }
+  mkdir -p "$root/decisions" "$root/skills" "$root/scripts"
+
+  # Ignore every project directory rather than listing them: a list would need
+  # updating on every clone, which is exactly the kind of maintenance that stops
+  # happening.
+  if [[ ! -f "$root/.gitignore" ]]; then
+    cat > "$root/.gitignore" <<'EOF'
+# Every project directory is its own git repo. Only the workspace layer — the
+# map, the principles, the decisions and the shared tooling — is tracked here.
+/*/
+!/decisions/
+!/skills/
+!/scripts/
+.DS_Store
+EOF
+    print -r -- "  .gitignore"
+  fi
+
+  if [[ ! -f "$root/CLAUDE.md" ]]; then
+    cat > "$root/CLAUDE.md" <<EOF
+# ${root:t} — workspace
+
+The root of everything I build. Each directory below is its own git repo; this
+level holds only what applies across all of them.
+
+- **[PRINCIPLES.md](PRINCIPLES.md)** — how things are built here.
+- **[decisions/](decisions/)** — one dated file per decision, with its reasoning.
+- **skills/**, **scripts/** — shared tooling.
+
+Managed with [siding](https://github.com/${WS_GH:-me}/siding): \`siding open\` to
+pick a repo, \`siding new <task> <repo>\` for a worktree, \`siding doctor\` to
+check the machine.
+
+## Repos
+
+The table below is generated by \`siding inventory --write\`. Do not edit it by
+hand — a hand-maintained inventory drifts, and tooling that reads a stale one
+fails silently rather than loudly.
+EOF
+    print -r -- "  CLAUDE.md"
+  fi
+
+  if [[ ! -f "$root/PRINCIPLES.md" ]]; then
+    cat > "$root/PRINCIPLES.md" <<'EOF'
+# Principles
+
+Rules that already describe how I work — not aspirations. A principle written
+before the decision it governs gets ignored; add one when you have decided the
+same thing twice, and record the decision itself in `decisions/`.
+
+## Identity and secrets
+
+- Git identity is decided by path, never by remembering to set it. Work trees
+  and personal trees route to different keys and emails automatically.
+- Nothing secret is committed. Config that varies by machine lives outside the
+  repo and is referenced, not embedded.
+- Repos start private. Making something public is a deliberate act.
+
+## Working
+
+- One task, one worktree. An interruption never forces stashing half-done work.
+- Main checkouts stay on the default branch, clean.
+- Anything generated is generated on demand, not transcribed. Transcribed facts
+  drift from their source and then mislead.
+
+## Writing things down
+
+- A decision worth explaining twice belongs in `decisions/`, dated, with the
+  reasoning and what was rejected.
+- Documentation states what is true now. When it stops being true it is fixed
+  or deleted, not annotated.
+EOF
+    print -r -- "  PRINCIPLES.md"
+  fi
+
+  ( cd "$root" && WS_ROOT="$root" sidinginventory --write )
+  print -r -- "  workspace scaffolded in $root"
 }
