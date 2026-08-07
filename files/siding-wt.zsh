@@ -665,7 +665,13 @@ siding() {
 
 _siding_dir()      { print -r -- "$HOME/.siding"; }
 _siding_profdir()  { print -r -- "$HOME/.siding/profiles"; }
-_siding_default()  { [[ -f "$(_siding_dir)/default" ]] && cat "$(_siding_dir)/default" || print -r -- work; }
+# Last used wins over the configured default; the default is the fallback for a
+# machine that has never opened one.
+_siding_default() {
+  [[ -f "$(_siding_dir)/last" ]] && { cat "$(_siding_dir)/last"; return }
+  [[ -f "$(_siding_dir)/default" ]] && { cat "$(_siding_dir)/default"; return }
+  print -r -- work
+}
 
 # Load a profile into the current shell.
 sidingprofile_load() {
@@ -701,6 +707,33 @@ sidingws() {
       gh auth switch --user "$WS_GH" >/dev/null 2>&1 \
         && print -r -- "gh → $WS_GH" \
         || print -u2 "siding: could not switch gh to $WS_GH (gh auth login --user $WS_GH)"
+    fi
+  fi
+
+  # Remember where you were. Ghostty opens the last workspace you used, which
+  # beats a fixed default: after a day in personal, being dropped into work is
+  # a small daily annoyance.
+  mkdir -p "$(_siding_dir)"
+  print -r -- "$name" > "$(_siding_dir)/last"
+
+  # Two tmux clients on ONE session mirror each other — move in one window and
+  # the other follows. A grouped session shares the same windows but lets each
+  # Ghostty sit on a different one, which is what makes a second window useful
+  # rather than a duplicate. destroy-unattached cleans it up on close.
+  if tmux has-session -t "=$WS_NAME" 2>/dev/null; then
+    local clients; clients=$(tmux list-clients -t "$WS_NAME" 2>/dev/null | wc -l | tr -d ' ')
+    if (( clients > 0 )) && [[ -z "$TMUX" ]]; then
+      local n=2 alt="${WS_NAME}-2"
+      while tmux has-session -t "=$alt" 2>/dev/null; do (( n++ )); alt="${WS_NAME}-$n"; done
+      tmux new-session -d -t "$WS_NAME" -s "$alt" 2>/dev/null
+      # NOT destroy-unattached: it kills a detached session immediately, so the
+      # attach below would find nothing. A detach hook cleans up at the right
+      # moment instead — when the window that owns it goes away.
+      tmux set-hook -t "$alt" client-detached "kill-session -t $alt" 2>/dev/null
+      tmux set-option -t "$alt" @gh "${WS_GH:-?}" 2>/dev/null
+      tmux set-option -t "$alt" @profile "$name" 2>/dev/null
+      tmux attach-session -t "$alt"
+      return
     fi
   fi
 

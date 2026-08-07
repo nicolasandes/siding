@@ -27,7 +27,8 @@ print -P "  %F{green}%Bsiding ws%b%f     %F{8}switch workspace/identity%f"
 print -P ""
 print -P "  %F{green}%B⌥r%b%f   open a repo or task worktree"
 print -P "  %F{green}%B⌥x%b%f   close the current repo window        %F{green}%B⌥w%b%f  close pane"
-print -P "  %F{green}%B⌥s%b%f   switch session                       %F{green}%B⌥⇥%b%f  next window"
+print -P "  %F{green}%B⌥p%b%f   switch workspace/identity            %F{green}%B⌥s%b%f  session tree"
+print -P "  %F{green}%B⌥⇥%b%f   next window"
 print -P "  %F{green}%B⌥d%b%f   detach to a plain shell — this keeps running"
 # printf, not print -P: print -P eats the backslash as an escape, and this line
 # has to display the ⌥\ key literally.
