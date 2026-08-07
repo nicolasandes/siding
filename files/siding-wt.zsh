@@ -38,7 +38,10 @@ _ws_repodirs() {
   done
 }
 
-_ws_wtbase() { print -r -- "$WS_ROOT/.claude/worktrees"; }
+# Worktrees live under the workspace so they are found wherever the workspace
+# is, and named after this tool rather than the workspace it was first built in.
+# Honours an override for anyone who wants them elsewhere.
+_ws_wtbase() { print -r -- "${SIDING_WORKTREES:-$WS_ROOT/.siding/worktrees}"; }
 
 # Resolve a repo shorthand to its checkout path. Accepts the exact directory
 # name or a suffix (tms -> apps/service-a).

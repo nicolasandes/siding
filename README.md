@@ -347,10 +347,14 @@ your terminal uses, siding follows it.
 
 ## Platforms
 
-macOS and Linux. Everything structural — tmux, zsh, git, gh, docker, python3 —
-exists on both, and the macOS-specific pieces are detected rather than assumed:
-Ghostty is optional, mtime handles BSD and GNU `stat`, and the clipboard picks
-`pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip.exe`.
+**Developed and used on macOS.** That is the only platform it has actually run
+on.
+
+Linux support is *written* but **untested**: the macOS-specific pieces are
+detected rather than assumed — Ghostty is optional, mtime handles both BSD and
+GNU `stat`, and the clipboard picks `pbcopy` / `wl-copy` / `xclip` / `xsel` /
+`clip.exe` — and everything structural (tmux, zsh, git, gh, docker, python3)
+exists there. It should work. Nobody has confirmed it. Reports welcome.
 
 **Windows** needs WSL2 — `tmux` and `zsh` do not run natively, and a native port
 would be a different program against PowerShell. Under WSL everything works with
@@ -366,6 +370,34 @@ windows; [ntm](https://github.com/Dicklesworthstone/ntm) coordinates AI agents
 across tmux panes; [sesh](https://github.com/joshmedeski/sesh) and
 [twm](https://github.com/vinnymeller/twm) manage tmux sessions. What siding adds
 is the dev stack following the worktree — see above.
+
+## Limitations
+
+Worth knowing before you rely on it.
+
+- **Tested on macOS only.** See Platforms above.
+- **Opinionated about keys.** Every binding is on Option, with no prefix in
+  daily use, because `Ctrl-a` never reached tmux on the machine this was built
+  on. If your prefix works fine, the prefix bindings are still there.
+- **`siding stack` needs the compose file to bind-mount the source.** A repo
+  that bakes its code into the image cannot be served from a worktree without a
+  rebuild; siding says so and declines rather than pretending.
+- **The shared stack uses one database across trees.** Switching it between
+  worktrees reuses the same data, so a branch's migrations persist. `--iso`
+  gives a tree its own database; the shared stack deliberately does not.
+- **Isolated stacks cost real resources.** Each is a full set of containers —
+  app, database, cache — so two of them is two databases running.
+- **The quiet-window marker is a proxy.** A window with an agent waiting and a
+  window you simply are not using look identical to tmux.
+- **`siding list` costs one `gh` call per worktree.** Use `--fast` to skip.
+- **`profile add --wire` edits `~/.gitconfig` and `~/.ssh/config`.** It is
+  idempotent and backs up what it touches, but it writes to files you probably
+  care about. Read it first if that matters to you.
+- **The `gh` account is global.** siding switches it when you enter a workspace,
+  which means it changes for every other terminal too. That is the point, but it
+  is a side effect worth knowing.
+- **No automated tests.** Everything here was verified by running it.
+- **Not packaged.** Clone and `./install.sh`; there is no Homebrew formula.
 
 ## Notes
 
