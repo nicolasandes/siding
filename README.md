@@ -318,6 +318,47 @@ is signed in as a different account, because a confidently short list reads as
 Generating it is the point. A hand-maintained inventory drifts, and tooling that
 reads a stale one fails silently rather than loudly.
 
+## Using a different terminal
+
+**Ghostty is not load-bearing.** It launches tmux and supplies the theme and
+transparency; everything else — the picker, worktrees, profiles, identity
+switching, isolated stacks — is tmux and shell. Any terminal works.
+
+Point your terminal's startup command at the launcher:
+
+| terminal | where |
+|---|---|
+| macOS Terminal | Settings → Profiles → Shell → *Run command*: `~/.siding-launch.zsh` |
+| iTerm2 | Profiles → General → Command → *Send text at start*, or set Command |
+| Windows Terminal (WSL) | profile `commandline`, appending `-c '~/.siding-launch.zsh'` |
+| anything else | just run `ws` after opening |
+
+**One thing you must change**, because every binding here is Option-based:
+tell the terminal to send Option as Meta, or `⌥r` arrives as `®` instead of a
+keystroke tmux understands.
+
+- macOS Terminal: Settings → Profiles → **Keyboard** → *Use Option as Meta key*
+- iTerm2: Profiles → **Keys** → *Left Option key: Esc+*
+- Ghostty: `macos-option-as-alt = true` (already in the shipped config)
+
+Without Ghostty you lose `siding theme` (a Ghostty feature) and the transparency
+settings. tmux takes its colours from the terminal palette, so whatever theme
+your terminal uses, siding follows it.
+
+## Platforms
+
+macOS and Linux. Everything structural — tmux, zsh, git, gh, docker, python3 —
+exists on both, and the macOS-specific pieces are detected rather than assumed:
+Ghostty is optional, mtime handles BSD and GNU `stat`, and the clipboard picks
+`pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip.exe`.
+
+**Windows** needs WSL2 — `tmux` and `zsh` do not run natively, and a native port
+would be a different program against PowerShell. Under WSL everything works with
+Windows Terminal in place of Ghostty. One caveat there: `siding stack` mounts
+the parent repo's `.git` at its own absolute host path, and Windows-side Docker
+sees different paths than the Linux side, so isolated stacks want testing on
+WSL specifically.
+
 ## Prior art
 
 [workmux](https://github.com/raine/workmux) pairs git worktrees with tmux

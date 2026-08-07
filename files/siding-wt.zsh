@@ -75,11 +75,24 @@ _ws_base_branch() {
   print -r -- master
 }
 
+# BSD and GNU stat disagree on how to ask for an mtime, and getting it wrong
+# yields a silent '?' rather than an error.
 _ws_age_days() {
   local d=$1 mt now
-  mt=$(stat -f %m "$d" 2>/dev/null) || { print -r -- '?'; return; }
+  mt=$(stat -f %m "$d" 2>/dev/null) || mt=$(stat -c %Y "$d" 2>/dev/null)
+  [[ -z "$mt" ]] && { print -r -- '?'; return }
   now=$(date +%s)
   print -r -- $(( (now - mt) / 86400 ))
+}
+
+# Ghostty is optional: it launches tmux and supplies the theme, but nothing
+# structural depends on it. Found rather than assumed, so Linux and WSL — where
+# the terminal is something else entirely — degrade instead of failing.
+_siding_ghostty() {
+  [[ -x /Applications/Ghostty.app/Contents/MacOS/ghostty ]] \
+    && { print -r -- /Applications/Ghostty.app/Contents/MacOS/ghostty; return 0 }
+  command -v ghostty 2>/dev/null && return 0
+  return 1
 }
 
 # wsclaude — start an agent session at the workspace root, where the
@@ -452,7 +465,7 @@ pick() { "$HOME/.siding-pick.zsh"; }
 # Ghostty (or just reopen it) to see the change.
 ghtheme() {
   local cfg="$HOME/.config/ghostty/config"
-  local bin=/Applications/Ghostty.app/Contents/MacOS/ghostty
+  local bin; bin=$(_siding_ghostty) || { print -u2 "ghtheme: Ghostty not found — themes are a Ghostty feature"; return 1 }
   if [[ -z "$1" ]]; then
     print -r -- "current: $(grep '^theme = ' "$cfg" | sed 's/theme = //')"
     print -r -- "usage: ghtheme <name>   (fuzzy match; try: ghtheme green)"
@@ -510,7 +523,10 @@ wsdoctor() {
 
   # tools
   command -v tmux >/dev/null && pass "tmux $(tmux -V | awk '{print $2}')" || fail "tmux missing — brew install tmux"
-  [[ -d /Applications/Ghostty.app ]] && pass "Ghostty installed" || note "Ghostty missing — brew install --cask ghostty"
+  pass "platform $(uname -s)"
+  local gbin; gbin=$(_siding_ghostty) \
+    && pass "Ghostty found" \
+    || note "Ghostty not found — optional; tmux runs in any terminal"
   command -v git >/dev/null && pass "git $(git --version | awk '{print $3}')" || fail "git missing"
   command -v docker >/dev/null && pass "docker present" || note "docker missing — wsup/wsconsole inert, rest works"
 
@@ -547,13 +563,16 @@ wsdoctor() {
       fail "~/.tmux.conf has errors — one bad option aborts the whole file"
     fi
   else fail "~/.tmux.conf missing"; fi
-  if [[ -d /Applications/Ghostty.app ]]; then
+  if [[ -n "$gbin" ]]; then
     local gerr
-    gerr=$(/Applications/Ghostty.app/Contents/MacOS/ghostty +show-config 2>&1 | grep -ci error)
+    gerr=$("$gbin" +show-config 2>&1 | grep -ci error)
     (( gerr == 0 )) && pass "Ghostty config valid" || fail "Ghostty config reports $gerr error(s)"
-    /Applications/Ghostty.app/Contents/MacOS/ghostty +show-config 2>/dev/null | grep -q 'siding-launch' \
+    "$gbin" +show-config 2>/dev/null | grep -q 'siding-launch' \
       && pass "Ghostty launches the workspace" || note "Ghostty config does not run ~/.siding-launch.zsh"
   fi
+  command -v pbcopy >/dev/null 2>&1 || command -v wl-copy >/dev/null 2>&1 || \
+    command -v xclip >/dev/null 2>&1 || command -v xsel >/dev/null 2>&1 || \
+    command -v clip.exe >/dev/null 2>&1 || note "no clipboard tool — copy-mode y will discard"
 
   # state worth knowing about
   local stale=0

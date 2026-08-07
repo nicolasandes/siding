@@ -1,0 +1,10 @@
+#!/bin/sh
+# Copy stdin to the system clipboard, whatever system this is.
+# tmux needs one command it can bind unconditionally; branching in tmux.conf
+# with if-shell is possible but multiplies the binding across platforms.
+if   command -v pbcopy  >/dev/null 2>&1; then exec pbcopy            # macOS
+elif command -v wl-copy >/dev/null 2>&1; then exec wl-copy           # Wayland
+elif command -v xclip   >/dev/null 2>&1; then exec xclip -selection clipboard
+elif command -v xsel    >/dev/null 2>&1; then exec xsel --clipboard --input
+elif command -v clip.exe >/dev/null 2>&1; then exec clip.exe         # WSL
+else cat > /dev/null; fi                                             # no clipboard: discard, do not error

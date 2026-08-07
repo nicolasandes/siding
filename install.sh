@@ -35,7 +35,8 @@ echo
 # ── prerequisites ────────────────────────────────────────────────────────────
 missing=()
 command -v tmux >/dev/null 2>&1 || missing+=("tmux")
-[ -d /Applications/Ghostty.app ] || missing+=("ghostty (cask)")
+command -v ghostty >/dev/null 2>&1 || [ -d /Applications/Ghostty.app ] || \
+  say "ghostty not found — optional; tmux runs in any terminal (see README)"
 if [ ${#missing[@]} -gt 0 ]; then
   warn "missing: ${missing[*]}"
   warn "install with:  brew install tmux && brew install --cask ghostty"
@@ -83,6 +84,8 @@ for f in "$SRC"/siding-*.zsh; do
   chmod +x "$HOME/.$(basename "$f")"
 done
 install_file "$SRC/siding-stackgen.py" "$HOME/.siding-stackgen.py"
+install_file "$SRC/siding-copy" "$HOME/.siding-copy"
+chmod +x "$HOME/.siding-copy"
 chmod +x "$HOME/.siding-stackgen.py"
 install_file "$SRC/tmux.conf"      "$HOME/.tmux.conf"
 install_file "$SRC/ghostty-config" "$HOME/.config/ghostty/config"
