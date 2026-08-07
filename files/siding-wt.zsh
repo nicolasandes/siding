@@ -340,6 +340,13 @@ wsstack() {
     elif [[ "$owner" == "$p" ]]; then printf "%-20s %s\n" "${p:t}" "main checkout"
     else                              printf "%-20s %s\n" "${p:t}" "${owner:t}"; fi
   done
+  local f proj dir first=1
+  for f in "$(_ws_statedir)"/iso-*(N); do
+    (( first )) && { print -r -- ""; printf "%-20s %s\n" ISOLATED "SERVING"; first=0 }
+    proj=${${f:t}#iso-}
+    dir=$(cat "$f" 2>/dev/null)
+    printf "%-20s %s\n" "$proj" "${dir:t}"
+  done
 }
 
 # wsconsole <task|main> <repo> [rails-subcommand] — console in the container
@@ -585,8 +592,13 @@ siding() {
     list|wip)    wswip "$@" ;;
     tidy)        sidingtidy "$@" ;;
     drop|done)   wsdone "$@" ;;
-    stack)       [[ -n "$1" ]] && wsup "$@" || wsstack ;;
-    down)        wsdown "$@" ;;
+    stack)
+      if [[ -z "$1" ]]; then wsstack
+      elif [[ "$3" == "--iso" || "$3" == "--isolated" ]]; then wsupiso "$1" "$2"
+      else wsup "$@"; fi ;;
+    down)
+      # two args = an isolated stack for that task; one = the shared stack
+      if [[ -n "$2" ]]; then wsdowniso "$1" "$2"; else wsdown "$@"; fi ;;
     console)     wsconsole "$@" ;;
     logs)        wslogs "$@" ;;
     task)        wstask "$@" ;;
@@ -617,7 +629,8 @@ siding() {
       print -r -- "  ${A}tidy${O}                        offer to remove worktrees whose work has landed"
       print -r -- ""
       print -r -- "  ${A}stack${O} [<task|main> <repo>]  point the dev stack at a tree, or show state"
-      print -r -- "  ${A}down${O} <repo>                 stop that repo's stack"
+      print -r -- "  ${A}stack${O} <task> <repo> --iso   its OWN containers, ports and database"
+      print -r -- "  ${A}down${O} <repo> | <task> <repo> stop the shared, or an isolated, stack"
       print -r -- "  ${A}console${O} <task|main> <repo>  rails console in the container serving it"
       print -r -- "  ${A}logs${O} <repo>                 follow the app logs"
       print -r -- ""
@@ -922,4 +935,96 @@ sidingtidy() {
   print -r -- ""
   (( found )) || print -r -- "  nothing to tidy — no worktree has landed yet"
   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Isolated stacks — two features of one repo running at the same time
+#
+# `wsup` re-points a repo's single stack at a tree. That is enough when you work
+# on one thing per repo, and it is the default because it costs nothing extra.
+# When you genuinely need two trees of the SAME repo up at once, wsupiso gives
+# each its own compose project.
+#
+# Compose already isolates almost everything per project — networks, and
+# crucially NAMED VOLUMES, which is why each isolated stack gets its own
+# postgres volume and therefore its own database. No database renaming needed:
+# a task branch's migrations cannot reach another tree's data.
+#
+# Only two things had to be overridden: container_name, which these files
+# hardcode, and host ports, which are fixed. See siding-stackgen.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ws_isoproj() { print -r -- "${${1:l}//[^a-z0-9]/-}-${${2:l}//[^a-z0-9]/-}"; }
+
+# wsupiso <task> <repo> — bring up an isolated stack for that worktree.
+wsupiso() {
+  local task=$1 repo=$2
+  if [[ -z "$task" || -z "$repo" ]]; then
+    print -u2 "usage: wsupiso <task> <repo>     (isolated stack: own containers, ports and database)"
+    return 1
+  fi
+  local p; p=$(_ws_repo "$repo") || { print -u2 "wsupiso: unknown repo '$repo'"; return 1; }
+  _ws_compose_file "$p" >/dev/null || { print -u2 "wsupiso: ${p:t} has no compose file"; return 1; }
+  local dir; dir=$(_ws_dir_for "$task" "$p")
+  [[ -d "$dir" ]] || { print -u2 "wsupiso: no tree at $dir"; return 1; }
+  [[ "$dir" == "$p" ]] && { print -u2 "wsupiso: 'main' is the shared stack — use wsup main $repo"; return 1; }
+
+  local svc; svc=$(_ws_app_svc "$p")
+  [[ -z "$svc" ]] && { print -u2 "wsupiso: ${p:t} bakes its code into the image; a worktree cannot be served"; return 1; }
+
+  mkdir -p "$(_ws_statedir)"
+  local proj; proj=$(_ws_isoproj "${p:t}" "$task")
+  local ov="$(_ws_statedir)/$proj.override.yml"
+  local cf; cf=$(_ws_compose_file "$dir")
+
+  _ws_seed_local "$p" "$dir"
+
+  # Resolve the config with docker itself, then generate the override from it.
+  local tmpjson="$(_ws_statedir)/$proj.config.json"
+  (cd "$dir" && docker compose -f "$cf" config --format json > "$tmpjson") 2>/dev/null \
+    || { print -u2 "wsupiso: could not resolve compose config"; return 1 }
+
+  # A deterministic starting offset per project, so the same task keeps the same
+  # ports across restarts; the generator walks upward if any are taken.
+  local off=$(( 1000 + (${#proj} * 137) % 3000 ))
+  local out
+  # The gitdir mount goes through the generator so it lands inside the app
+  # service's own block — a second block for the same service is a duplicate
+  # mapping key and compose rejects the file outright.
+  # Borrow any cache volume the shared stack has already populated. Data
+  # volumes are deliberately NOT shared — those are what isolate the database.
+  local shared_proj="$(_ws_project "$p")"
+  local -a shargs
+  local v ext
+  for v in $(python3 -c "import json,sys;print(' '.join((json.load(open(sys.argv[1])).get('volumes') or {}).keys()))" "$tmpjson" 2>/dev/null); do
+    case "$v" in *cache*|*bundle*|*gems*)
+      ext="${shared_proj}_${v}"
+      docker volume inspect "$ext" >/dev/null 2>&1 && shargs+=("$v=$ext") ;;
+    esac
+  done
+  (( ${#shargs} )) && print -r -- "  sharing cache volume(s): ${shargs}"
+  out=$(python3 "$HOME/.siding-stackgen.py" "$proj" "$off" "$tmpjson" "$ov" "$svc" "$p/.git" "${shargs[@]}") || return 1
+  rm -f "$tmpjson"
+
+  print -r -- "starting isolated stack $proj from ${dir:t} ..."
+  (cd "$dir" && docker compose -p "$proj" -f "$cf" -f "$ov" up -d 2>&1 | tail -3)
+  print -r -- "$dir" > "$(_ws_statedir)/iso-$proj"
+  print -r -- ""
+  print -r -- "  project   $proj"
+  print -r -- "  tree      $dir"
+  print -r -- "$out" | sed -n '2,$p' | sed 's/^/  port      /'
+  print -r -- "  database  own volume — this stack cannot touch another tree's data"
+}
+
+# wsdowniso <task> <repo> — stop and forget an isolated stack.
+wsdowniso() {
+  local task=$1 repo=$2
+  local p; p=$(_ws_repo "$repo") || return 1
+  local proj; proj=$(_ws_isoproj "${p:t}" "$task")
+  local dir; dir=$(cat "$(_ws_statedir)/iso-$proj" 2>/dev/null)
+  local ov="$(_ws_statedir)/$proj.override.yml"
+  [[ -d "$dir" ]] || { print -u2 "wsdowniso: no isolated stack '$proj'"; return 1 }
+  (cd "$dir" && docker compose -p "$proj" -f "$(_ws_compose_file "$dir")" -f "$ov" down --remove-orphans 2>&1 | tail -2)
+  rm -f "$(_ws_statedir)/iso-$proj" "$ov"
+  print -r -- "→ $proj down"
 }

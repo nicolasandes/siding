@@ -82,6 +82,8 @@ for f in "$SRC"/siding-*.zsh; do
   install_file "$f" "$HOME/.$(basename "$f")"
   chmod +x "$HOME/.$(basename "$f")"
 done
+install_file "$SRC/siding-stackgen.py" "$HOME/.siding-stackgen.py"
+chmod +x "$HOME/.siding-stackgen.py"
 install_file "$SRC/tmux.conf"      "$HOME/.tmux.conf"
 install_file "$SRC/ghostty-config" "$HOME/.config/ghostty/config"
 say "installed tmux.conf, ghostty config and the siding-* scripts"

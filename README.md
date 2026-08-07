@@ -228,8 +228,37 @@ Two things make re-pointing work, both found the hard way:
    `fatal: not a git repository: (null)`, exit 128, which kills entrypoints that
    run git before `bundle install`.
 
-Caveat: the stack keeps its usual database, so migrations from a task branch
-mutate the shared dev database.
+### Two trees of one repo at once
+
+`siding stack <task> <repo>` re-points the repo's single stack — enough when you
+work on one thing per repo, and the default because it costs nothing. When you
+need two trees of the **same** repo running together:
+
+```sh
+siding stack 348 service-a --iso
+siding down 348 service-a          # two args = the isolated stack
+```
+
+Each isolated stack is its own compose project, which means its own containers,
+its own host ports (remapped automatically to a free block) and — because these
+compose files use **named volumes** — its own postgres volume. So the database
+is isolated for free: a task branch's migrations cannot reach another tree's
+data. Verified by creating a table in one and confirming the other cannot see
+it.
+
+Only two things need overriding, and the generator does both: `container_name`,
+which these files hardcode, and host ports. Ports use compose's `!override`
+tag — a plain list would *merge*, publishing the original port alongside the
+remapped one, and the original is exactly what the other stack is holding.
+
+Cache volumes (`bundle_cache` and friends) are deliberately **shared** with the
+main stack. They are not data, and a fresh project would otherwise re-download
+every dependency — which for private git-sourced gems needs credentials the warm
+shared cache never had to present.
+
+Caveat: the *shared* stack (`siding stack main <repo>`) still uses one database
+across trees. Use `--iso` when a branch has migrations you do not want landing
+in it.
 
 ## Renaming it
 
