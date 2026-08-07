@@ -98,11 +98,12 @@ wsnew() {
 # wswip — every task worktree across the workspace. Main checkouts excluded;
 # they are meant to stay clean on their default branch.
 wswip() {
-  local p wt br dirty age found=0
-  printf "%-20s %-30s %-34s %5s %5s\n" REPO TASK BRANCH DIRTY DAYS
-  printf "%-20s %-30s %-34s %5s %5s\n" "--------------------" \
-    "------------------------------" "----------------------------------" \
-    "-----" "-----"
+  local p wt br dirty age pr found=0 nopr=0
+  [[ "$1" == "--fast" ]] && nopr=1     # skip the gh lookups
+  printf "%-18s %-26s %-30s %5s %5s  %s\n" REPO TASK BRANCH DIRTY DAYS PR
+  printf "%-18s %-26s %-30s %5s %5s  %s\n" "------------------" \
+    "--------------------------" "------------------------------" \
+    "-----" "-----" "--"
   for p in "$WS_ROOT" "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
     p=${p%/}
     [[ -e "$p/.git" ]] || continue
@@ -114,7 +115,8 @@ wswip() {
           if [[ -n "$wt" && "$wt" != "$p" ]]; then
             dirty=$(git -C "$wt" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
             age=$(_ws_age_days "$wt")
-            printf "%-20s %-30s %-34s %5s %5s\n" "${p:t}" "${wt:t}" "${br:-detached}" "$dirty" "$age"
+            pr=""; (( nopr )) || pr=$(_ws_pr "$wt" "$br")
+            printf "%-18s %-26s %-30s %5s %5s  %s\n" "${p:t}" "${wt:t}" "${br:-detached}" "$dirty" "$age" "${pr:--}"
             found=1
           fi
           wt= br=
@@ -581,6 +583,7 @@ siding() {
     open|pick)   "$HOME/.siding-pick.zsh" ;;
     new)         wsnew "$@" ;;
     list|wip)    wswip "$@" ;;
+    tidy)        sidingtidy "$@" ;;
     drop|done)   wsdone "$@" ;;
     stack)       [[ -n "$1" ]] && wsup "$@" || wsstack ;;
     down)        wsdown "$@" ;;
@@ -611,6 +614,7 @@ siding() {
       print -r -- "  ${A}new${O} <task> <repo>           worktree off origin/<default>"
       print -r -- "  ${A}list${O}                        what is parked where"
       print -r -- "  ${A}drop${O} <task> <repo> [--force] remove a worktree"
+      print -r -- "  ${A}tidy${O}                        offer to remove worktrees whose work has landed"
       print -r -- ""
       print -r -- "  ${A}stack${O} [<task|main> <repo>]  point the dev stack at a tree, or show state"
       print -r -- "  ${A}down${O} <repo>                 stop that repo's stack"
@@ -823,4 +827,99 @@ EOF
     print -r -- "  add this key to the $gh account:"
     print -r -- "    gh auth switch --user $gh && gh ssh-key add $key.pub --title \"\$(hostname) $name\""
   fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Knowing what is safe to remove
+#
+# The four orphan worktrees that started all this survived because nothing ever
+# swept, and nothing showed whether their work had landed. A branch being merged
+# is the fact that makes a worktree disposable, so it belongs in the listing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# PR state for a branch, as a short label. Empty when gh is unavailable or the
+# branch has no PR — absence of a PR is not evidence of anything.
+_ws_pr() {
+  local dir=$1 br=$2
+  [[ -n "$br" ]] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  local out
+  out=$(cd "$dir" 2>/dev/null && gh pr view "$br" --json number,state,mergeStateStatus \
+        --jq '"#\(.number) \(.state|ascii_downcase)\(if .mergeStateStatus=="DIRTY" then " ⚠conflict" else "" end)"' 2>/dev/null)
+  print -r -- "$out"
+}
+
+# Has the branch landed on the default branch, PR or not?
+_ws_merged() {
+  local p=$1 br=$2
+  [[ -n "$br" ]] || return 1
+  local base; base=$(_ws_base_branch "$p")
+  git -C "$p" merge-base --is-ancestor "$br" "origin/$base" 2>/dev/null
+}
+
+# sidingtidy [--yes] — offer to remove worktrees whose work has landed.
+# Never touches anything with uncommitted or unpushed work: wsdone enforces
+# that, and this deliberately routes through it rather than around it.
+sidingtidy() {
+  local auto=0; [[ "$1" == "--yes" || "$1" == "-y" ]] && auto=1
+  local p wt br dirty pr base found=0 removed=0
+  local G=$'\e[32m' Y=$'\e[33m' D=$'\e[90m' O=$'\e[0m'
+
+  for p in "$WS_ROOT" "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
+    [[ -e "$p/.git" ]] || continue
+    git -C "$p" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
+      case "$line" in
+        worktree\ *) wt=${line#worktree } ;;
+        branch\ *)   br=${line#branch refs/heads/} ;;
+        '')
+          # -d guards against a tree removed earlier in this same sweep still
+          # appearing in output git had already produced.
+          if [[ -n "$wt" && -d "$wt" && "$wt" != "$p" && "$wt" == "$(_ws_wtbase)"/* ]]; then
+            dirty=$(git -C "$wt" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+            pr=$(_ws_pr "$wt" "$br")
+            local reason="" ahead
+            base=$(_ws_base_branch "$p")
+            ahead=$(git -C "$wt" rev-list --count "origin/$base..HEAD" 2>/dev/null)
+            [[ "$pr" == *merged* ]] && reason="${pr} merged"
+            [[ "$pr" == *closed* ]] && reason="${pr} closed"
+            # A tree cut from origin and never committed to is trivially an
+            # ancestor of it. That is "nothing here", not "work landed" — saying
+            # merged would be true and misleading.
+            if [[ -z "$reason" ]]; then
+              if (( ${ahead:-0} == 0 )) && (( dirty == 0 )); then reason="no commits yet — nothing in it"
+              elif _ws_merged "$p" "$br"; then reason="branch merged into origin/$base"; fi
+            fi
+            if [[ -n "$reason" ]]; then
+              found=1
+              print -r -- ""
+              print -r -- "  ${wt:t}  ${D}(${p:t})${O}"
+              (( dirty > 0 )) \
+                && print -r -- "    $reason, ${Y}$dirty uncommitted${O}" \
+                || print -r -- "    $reason"
+              local ans=y
+              if (( ! auto )); then
+                # From the terminal, not stdin: stdin here is the git worktree
+                # listing being piped in, so a plain read swallows that instead
+                # of waiting for you.
+                print -n "    remove? [y/N] "
+                read -r ans </dev/tty 2>/dev/null || ans=n
+              fi
+              if [[ "$ans" == y* ]]; then
+                local task=${${wt:t}%%--*}
+                if wsdone "$task" "$p" >/dev/null 2>&1; then
+                  print -r -- "    ${G}removed${O}"; (( removed++ ))
+                elif [[ -d "$wt" ]]; then
+                  print -r -- "    ${Y}kept${O} — wsdone refused it (uncommitted or unpushed)"
+                fi
+              fi
+            fi
+          fi
+          wt= br=
+          ;;
+      esac
+    done
+  done
+  print -r -- ""
+  (( found )) || print -r -- "  nothing to tidy — no worktree has landed yet"
+  return 0
 }

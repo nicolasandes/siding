@@ -41,3 +41,10 @@ win=$(tmux new-window -P -F '#{window_id}' -n "$label" -c "$WS_ROOT")
 tmux send-keys -t "${win}.1" "claude" C-m
 tmux split-window -h -l 40% -c "$dir" -t "$win"
 tmux select-pane -t "${win}.2"
+
+# Flag the window when it goes quiet. An agent that has stopped producing
+# output is usually waiting on you, and with several windows open "who needs
+# me" is the question you ask constantly. Silence is a proxy, not a certainty —
+# a window you simply are not using also goes quiet — but it is the only signal
+# available without parsing agent output.
+tmux set-window-option -t "$win" monitor-silence 45 >/dev/null

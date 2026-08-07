@@ -72,6 +72,11 @@ it and every window, pane and agent session is exactly as you left it.
 Double-click the status bar also opens the picker; right-click a tab for tmux's
 own menu. `pick` runs the picker as a plain command.
 
+A **●** beside a window name means that window has gone quiet for 45 seconds —
+usually an agent waiting on you. It is a proxy, not a certainty: a window you
+simply are not using looks the same. With several windows open it is still the
+fastest answer to "who needs me".
+
 There is no prefix key in daily use. `Ctrl-a` is still configured, but every
 binding above is prefix-free — on some machines `Ctrl-a` never reaches tmux at
 all, and a workspace you cannot get into is worse than one extra modifier.
@@ -101,7 +106,8 @@ One entry point, `siding <command>` — run `siding help` for the list:
 |---|---|
 | `siding open` | the repo picker (same as ⌥r) |
 | `siding new <task> <repo>` | worktree off `origin/<default>` |
-| `siding list` | what is parked where |
+| `siding list [--fast]` | what is parked where, with PR state (`--fast` skips the gh lookups) |
+| `siding tidy [--yes]` | offer to remove worktrees whose work has landed |
 | `siding drop <task> <repo>` | remove one |
 | `siding stack [<task\|main> <repo>]` | point the dev stack at a tree, or show state |
 | `siding console <task\|main> <repo>` | rails console in the container serving it |
@@ -193,6 +199,14 @@ holding the email plus `insteadOf` rules pinning every URL in that tree to the
 right SSH host, and the matching `~/.ssh/config` alias. `--keygen` creates the
 key and prints the one command needed to register it. Idempotent, and it backs
 up anything it edits.
+
+### Knowing what is safe to remove
+
+`siding list` shows each worktree's PR state, and `siding tidy` offers to remove
+the ones whose work has landed — PR merged or closed, branch merged into the
+default branch, or a tree with no commits in it at all. It routes every removal
+through the same refusal rules, so uncommitted or unpushed work is never
+dropped. Nothing sweeping is why orphaned worktrees accumulate.
 
 ## Why the dev stack follows the worktree
 
