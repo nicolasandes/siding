@@ -697,6 +697,8 @@ sidingprofile_list() {
 # siding ws <profile> — attach to that workspace, switching gh with it.
 sidingws() {
   local name=${1:-$(_siding_default)}
+  local force_switch=0
+  [[ "$2" == "--switch" || -n "$TMUX" ]] && force_switch=1
   sidingprofile_load "$name" || return 1
 
   # gh's active account is global. Switching on attach is the whole point: the
@@ -715,6 +717,20 @@ sidingws() {
   # a small daily annoyance.
   mkdir -p "$(_siding_dir)"
   print -r -- "$name" > "$(_siding_dir)/last"
+
+  # Already inside tmux — including inside a display-popup, which is its own
+  # little terminal. Attaching here would open the workspace INSIDE the popup
+  # instead of moving the client you are actually looking at; switch-client
+  # moves that client.
+  if (( force_switch )); then
+    if ! tmux has-session -t "=$WS_NAME" 2>/dev/null; then
+      tmux new-session -d -s "$WS_NAME" -n home -c "$WS_ROOT" "$HOME/.siding-home.zsh" 2>/dev/null
+    fi
+    tmux set-option -t "$WS_NAME" @gh "${WS_GH:-?}" 2>/dev/null
+    tmux set-option -t "$WS_NAME" @profile "$name" 2>/dev/null
+    tmux switch-client -t "$WS_NAME"
+    return
+  fi
 
   # Two tmux clients on ONE session mirror each other — move in one window and
   # the other follows. A grouped session shares the same windows but lets each

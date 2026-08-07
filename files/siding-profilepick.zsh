@@ -58,5 +58,7 @@ while true; do
             sel=$idx ;;
   esac
   printf '\e[H\e[2J'
-  exec sidingws "${names[$sel]}"
+  # --switch, not a plain call: this runs inside a popup, so the workspace must
+  # be handed to the client that opened it rather than attached in here.
+  exec sidingws "${names[$sel]}" --switch
 done
