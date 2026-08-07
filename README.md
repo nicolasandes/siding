@@ -363,6 +363,11 @@ the parent repo's `.git` at its own absolute host path, and Windows-side Docker
 sees different paths than the Linux side, so isolated stacks want testing on
 WSL specifically.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The most useful contribution right now
+is telling me whether it works on Linux, since nobody has run it there.
+
 ## Prior art
 
 [workmux](https://github.com/raine/workmux) pairs git worktrees with tmux
