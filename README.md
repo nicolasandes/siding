@@ -85,8 +85,10 @@ all, and a workspace you cannot get into is worse than one extra modifier.
 ### The picker
 
 Lists task worktrees first (marked `●`), then every git repo in the workspace.
-Repos are found whether they sit directly in `WS_ROOT` or are grouped under
-`apps/` and `gems/`.
+Repos are found whether they sit directly in `WS_ROOT` or one level down in a
+grouping directory — `projects/`, `apps/`, `gems/`, whatever you call it. The
+grouping directories are discovered, not hardcoded: naming them in the code is
+how a workspace that reorganises itself quietly stops being scanned.
 
 Choosing a **worktree** opens it. Choosing a **repo** asks first:
 

@@ -20,6 +20,24 @@ export WS_ROOT="${WS_ROOT:-$HOME/dev}"
 export WS_NAME="${WS_NAME:-${WS_ROOT:t}}"
 export WS_GH WS_EMAIL WS_SSH_HOST
 
+
+# Every repo in the workspace, whether it sits directly in the root or inside a
+# grouping directory like projects/, apps/ or gems/. One level of grouping is
+# discovered generically rather than by name — hardcoding the names is how a
+# workspace that reorganises itself quietly stops being scanned.
+_ws_repodirs() {
+  local d g
+  for d in "$WS_ROOT"/*(/N); do
+    if [[ -e "$d/.git" ]]; then print -r -- "$d"; continue; fi
+    case "${d:t}" in
+      .*|node_modules|decisions|skills|scripts|docs|bin) continue ;;
+    esac
+    for g in "$d"/*(/N); do
+      [[ -e "$g/.git" ]] && print -r -- "$g"
+    done
+  done
+}
+
 _ws_wtbase() { print -r -- "$WS_ROOT/.claude/worktrees"; }
 
 # Resolve a repo shorthand to its checkout path. Accepts the exact directory
@@ -37,8 +55,8 @@ _ws_repo() {
   local d
   cands=("$WS_ROOT/$r" "$WS_ROOT/apps/$r" "$WS_ROOT/gems/$r")
   # Suffix match, so `tms` finds service-a without hardcoding any prefix.
-  for d in "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
-    [[ "${d:t}" == *"-$r" || "${d:t}" == *"_$r" ]] && cands+=("$d")
+  for d in $(_ws_repodirs); do
+    [[ "${d:t}" == "$r" || "${d:t}" == *"-$r" || "${d:t}" == *"_$r" ]] && cands+=("$d")
   done
   for p in "${cands[@]}"; do
     if [[ -e "$p/.git" ]]; then print -r -- "${p:A}"; return 0; fi
@@ -104,7 +122,7 @@ wswip() {
   printf "%-18s %-26s %-30s %5s %5s  %s\n" "------------------" \
     "--------------------------" "------------------------------" \
     "-----" "-----" "--"
-  for p in "$WS_ROOT" "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
+  for p in "$WS_ROOT" $(_ws_repodirs); do
     p=${p%/}
     [[ -e "$p/.git" ]] || continue
     git -C "$p" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
@@ -556,9 +574,8 @@ wsdoctor() {
     fi
     # Does git actually resolve to this identity inside the workspace? Ask git
     # rather than assume: insteadOf rules rewrite silently.
-    local probe; probe=$(command ls -d "$WS_ROOT"/*/.git(N) "$WS_ROOT"/apps/*/.git(N) 2>/dev/null | head -1)
-    if [[ -n "$probe" ]]; then
-      local rd=${probe:h}
+    local rd; rd=$(_ws_repodirs | head -1)
+    if [[ -n "$rd" ]]; then
       local e; e=$(git -C "$rd" config user.email 2>/dev/null)
       if [[ -z "$e" ]]; then note "git has no email in $WS_ROOT — check ~/.gitconfig includeIf"
       elif [[ -n "$WS_EMAIL" && "$e" != "$WS_EMAIL" ]]; then
@@ -815,8 +832,8 @@ sidingprofile_add() {
   mkdir -p "$(_siding_profdir)"
   cat > "$(_siding_profdir)/$name.env" <<EOF
 # siding profile: $name
-WS_ROOT="${root/#$HOME/\$HOME}"
-WS_NAME="$name"
+WS_ROOT="\${WS_ROOT:-${root/#$HOME/\$HOME}}"
+WS_NAME="\${WS_NAME:-$name}"
 WS_GH="$gh"
 WS_EMAIL="$email"
 WS_SSH_HOST="$sshhost"
@@ -931,7 +948,7 @@ sidingtidy() {
   local p wt br dirty pr base found=0 removed=0
   local G=$'\e[32m' Y=$'\e[33m' D=$'\e[90m' O=$'\e[0m'
 
-  for p in "$WS_ROOT" "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
+  for p in "$WS_ROOT" $(_ws_repodirs); do
     [[ -e "$p/.git" ]] || continue
     git -C "$p" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
       case "$line" in
@@ -1102,7 +1119,10 @@ _siding_repo_row() {
   esac
   last=$(git -C "$d" log -1 --format=%as 2>/dev/null)
   rem=$(git -C "$d" remote get-url origin 2>/dev/null | sed -E 's|\.git$||; s|.*[:/]([^/]+/[^/]+)$|\1|')
-  print -r -- "| \`$name\` | $lang | ${rem:-—} | ${last:-—} |"
+  # Show the path relative to the workspace, not just the name: once repos are
+  # grouped under projects/ or apps/, the name alone no longer says where it is.
+  local rel=${d#$WS_ROOT/}
+  print -r -- "| \`$rel\` | $lang | ${rem:-—} | ${last:-—} |"
 }
 
 # sidinginventory [--write] — the table of what is actually here.
@@ -1110,10 +1130,7 @@ sidinginventory() {
   local write=0; [[ "$1" == "--write" ]] && write=1
   local -a rows
   local d
-  for d in "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
-    [[ -e "$d/.git" ]] || continue
-    rows+=("$(_siding_repo_row "$d")")
-  done
+  for d in $(_ws_repodirs); do rows+=("$(_siding_repo_row "$d")"); done
 
   local out=""
   out+="| repo | stack | remote | last commit |"$'\n'
@@ -1133,7 +1150,7 @@ sidinginventory() {
       local -a absent
       local n
       for n in $(gh repo list "$WS_GH" --limit 200 --json name --jq '.[].name' 2>/dev/null); do
-        [[ -e "$WS_ROOT/$n/.git" ]] || absent+=("$n")
+        _ws_repodirs | grep -qx ".*/$n" || absent+=("$n")
       done
       if (( ${#absent} )); then
         local list=""

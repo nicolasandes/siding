@@ -27,18 +27,21 @@ if [[ -d "$WTBASE" ]]; then
   done
 fi
 
-# Repos live either directly in the workspace (a flat ~/dev/project layout) or
-# grouped under apps/ and gems/. Scan all three so the setup is not tied to any
-# one workspace's shape; seen[] keeps a repo from listing twice.
-typeset -A seen
-for d in "$WS_ROOT"/*(/N) "$WS_ROOT"/apps/*(/N) "$WS_ROOT"/gems/*(/N); do
-  [[ -e "$d/.git" ]] || continue
+# One scan, shared with the rest of siding: repos directly in the workspace and
+# repos inside a grouping directory (projects/, apps/, gems/ — discovered, not
+# hardcoded). seen[] keeps a repo from listing twice.
+source "$HOME/.siding-wt.zsh"
+typeset -A seen basenames
+for d in $(_ws_repodirs); do
   [[ -n "${seen[${d:A}]}" ]] && continue
   seen[${d:A}]=1
+  (( basenames[${d:t}]++ ))
+done
+for d in $(_ws_repodirs); do
   name=${d:t}; parent=${${d:h}:t}; label=$name; win=$name
   # Same basename in more than one group — say which, or you cannot tell them
   # apart in the list.
-  if [[ -e "$WS_ROOT/apps/$name/.git" && -e "$WS_ROOT/gems/$name/.git" ]]; then
+  if (( basenames[$name] > 1 )); then
     label="$name  ($parent)"; win="${name}_${parent}"
   fi
   add "$label" "$d" "$win" repo
