@@ -300,9 +300,22 @@ siding() {
 
 _siding_dir()      { print -r -- "$HOME/.siding"; }
 _siding_profdir()  { print -r -- "$HOME/.siding/profiles"; }
-# Last used wins over the configured default; the default is the fallback for a
-# machine that has never opened one.
+# The profile whose WS_ROOT contains a given path, if any. Where you are is a
+# better signal than what was last recorded, and it cannot go stale.
+_siding_profile_for_path() {
+  local target=${1:-$PWD} f n root
+  target=${target:A}
+  for f in "$(_siding_profdir)"/*.env(N); do
+    n=${${f:t}%.env}
+    root=$( unset WS_ROOT; source "$f" >/dev/null 2>&1; print -r -- "${WS_ROOT:A}" )
+    [[ -n "$root" && "$target" == "$root"(|/*) ]] && { print -r -- "$n"; return 0 }
+  done
+  return 1
+}
+
+# Where you are, then what you used last, then the recorded default.
 _siding_default() {
+  local bypath; bypath=$(_siding_profile_for_path 2>/dev/null) && { print -r -- "$bypath"; return }
   [[ -f "$(_siding_dir)/last" ]] && { cat "$(_siding_dir)/last"; return }
   [[ -f "$(_siding_dir)/default" ]] && { cat "$(_siding_dir)/default"; return }
   print -r -- work
@@ -325,7 +338,9 @@ sidingprofile_list() {
   printf "  %-12s %-34s %-22s %s\n" PROFILE WORKSPACE "GITHUB ACCOUNT" ""
   for f in "$(_siding_profdir)"/*.env(N); do
     n=${${f:t}%.env}
-    ( source "$f"; printf "  %-12s %-34s %-22s %s\n" "$n" "${WS_ROOT/#$HOME/~}" "${WS_GH:-—}" "$([[ $n == $cur ]] && print default)" )
+    ( unset WS_ROOT WS_NAME WS_GH WS_EMAIL WS_SSH_HOST
+      source "$f"
+      printf "  %-12s %-34s %-22s %s\n" "$n" "${WS_ROOT/#$HOME/~}" "${WS_GH:-—}" "$([[ $n == $cur ]] && print default)" )
   done
 }
 
@@ -650,6 +665,15 @@ _siding_repo_row() {
 # sidinginventory [--write] — the table of what is actually here.
 sidinginventory() {
   local write=0 force=0 active a d n r slug f list out
+  # Adopt the profile for wherever this is being run. The shell inherits
+  # whichever profile the session opened with, so running this inside another
+  # workspace would otherwise read that workspace's repos with the first
+  # workspace's account — and then refuse to write, blaming the account.
+  local here; here=$(_siding_profile_for_path 2>/dev/null)
+  if [[ -n "$here" && "$here" != "${SIDING_PROFILE:-}" ]]; then
+    print -r -- "  using profile '$here' for $(pwd | sed "s|$HOME|~|")"
+    sidingprofile_load "$here" || return 1
+  fi
   local -a rows absent have
   for a in "$@"; do
     [[ "$a" == "--write" ]] && write=1
@@ -666,7 +690,8 @@ sidinginventory() {
       print -u2 "siding inventory: gh is signed in as '${active:-none}', not '$WS_GH'."
       print -u2 "  The not-cloned list cannot be produced, and writing without it would"
       print -u2 "  replace a complete list with a note saying it could not look."
-      print -u2 "  Fix:  siding ws ${SIDING_PROFILE:-<profile>}     Override:  --force"
+      local want; want=$(_siding_profile_for_path "$WS_ROOT" 2>/dev/null)
+      print -u2 "  Fix:  siding ws ${want:-<the profile for this workspace>}     Override:  --force"
       return 1
     fi
   fi
