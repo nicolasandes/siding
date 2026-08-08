@@ -1149,15 +1149,33 @@ _siding_repo_row() {
 
 # sidinginventory [--write] — the table of what is actually here.
 sidinginventory() {
-  local write=0; [[ "$1" == "--write" ]] && write=1
-  local -a rows
-  local d
+  local write=0 force=0 active a d n r slug f list out
+  local -a rows absent have
+  for a in "$@"; do
+    [[ "$a" == "--write" ]] && write=1
+    [[ "$a" == "--force" ]] && force=1
+  done
+
+  # Refuse to write a degraded document over a better one. Signed in as another
+  # account, the not-cloned list cannot be produced — and writing "skipped" over
+  # a complete list loses information silently, which is the exact failure this
+  # generated inventory exists to prevent. It happened once already.
+  if (( write )) && (( ! force )) && [[ -n "$WS_GH" ]] && command -v gh >/dev/null 2>&1; then
+    active=$(gh api user --jq .login 2>/dev/null)
+    if [[ "$active" != "$WS_GH" ]]; then
+      print -u2 "siding inventory: gh is signed in as '${active:-none}', not '$WS_GH'."
+      print -u2 "  The not-cloned list cannot be produced, and writing without it would"
+      print -u2 "  replace a complete list with a note saying it could not look."
+      print -u2 "  Fix:  siding ws ${SIDING_PROFILE:-<profile>}     Override:  --force"
+      return 1
+    fi
+  fi
   for d in $(_ws_repodirs); do rows+=("$(_siding_repo_row "$d")"); done
 
-  local out=""
+  out=""
   out+="| repo | stack | remote | last commit |"$'\n'
   out+="|---|---|---|---|"$'\n'
-  local r; for r in "${rows[@]}"; do out+="$r"$'\n'; done
+  for r in "${rows[@]}"; do out+="$r"$'\n'; done
 
   # Repos that exist on the account but are not cloned here. Knowing what is
   # missing is as useful as knowing what is present, and it is the half a
@@ -1167,15 +1185,20 @@ sidinginventory() {
     # account can see just the public repos, and a confidently short list is
     # worse than none — it reads as "these are all missing" when it means
     # "I could not see the private ones".
-    local active; active=$(gh api user --jq .login 2>/dev/null)
+    active=$(gh api user --jq .login 2>/dev/null)
     if [[ "$active" == "$WS_GH" ]]; then
-      local -a absent
-      local n
+      # Include the workspace root itself: it is usually a repo too, and its
+      # directory name need not match its repo name.
+      for d in "$WS_ROOT" $(_ws_repodirs); do
+        [[ -e "$d/.git" ]] || continue
+        slug=$(git -C "$d" remote get-url origin 2>/dev/null | sed -E 's|\.git$||; s|.*/||')
+        [[ -n "$slug" ]] && have+=("$slug")
+      done
       for n in $(gh repo list "$WS_GH" --limit 200 --json name --jq '.[].name' 2>/dev/null); do
-        _ws_repodirs | grep -qx ".*/$n" || absent+=("$n")
+        (( ${have[(I)$n]} )) || absent+=("$n")
       done
       if (( ${#absent} )); then
-        local list=""
+        list=""
         for n in "${absent[@]}"; do list+="\`$n\`, "; done
         out+=$'\n'"On \`$WS_GH\` but not cloned here: ${list%, }"$'\n'
       fi
@@ -1185,7 +1208,7 @@ sidinginventory() {
   fi
 
   if (( write )); then
-    local f="$WS_ROOT/CLAUDE.md"
+    f="$WS_ROOT/CLAUDE.md"
     [[ -f "$f" ]] || { print -u2 "sidinginventory: no $f — run siding init first"; return 1 }
     python3 - "$f" <<PYEOF
 import re, sys

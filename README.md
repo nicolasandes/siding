@@ -372,6 +372,21 @@ the parent repo's `.git` at its own absolute host path, and Windows-side Docker
 sees different paths than the Linux side, so isolated stacks want testing on
 WSL specifically.
 
+## Testing
+
+```sh
+script/smoke.zsh
+```
+
+Builds a throwaway workspace in a temp directory — a bare repo standing in for
+a remote, a checkout inside a grouping directory — points siding at it, and
+asserts behaviour. No network, no docker, no gh, and nothing in your real
+workspace is touched.
+
+Every assertion corresponds to something that was once wrong and looked right.
+Silent failure is this project's characteristic bug, so the test asserts on
+output rather than exit codes alone.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The most useful contribution right now
@@ -410,7 +425,11 @@ Worth knowing before you rely on it.
 - **The `gh` account is global.** siding switches it when you enter a workspace,
   which means it changes for every other terminal too. That is the point, but it
   is a side effect worth knowing.
-- **No automated tests.** Everything here was verified by running it.
+- **One smoke test, not a suite.** `script/smoke.zsh` builds a throwaway
+  workspace and asserts 22 behaviours — discovery, resolution, worktree
+  creation and removal, the refusal to drop uncommitted work, inventory and the
+  picker. It covers the paths that have broken silently before; it does not
+  cover the docker or gh paths, which need both installed and configured.
 - **Not packaged.** Clone and `./install.sh`; there is no Homebrew formula.
 
 ## Notes
