@@ -430,7 +430,10 @@ Worth knowing before you rely on it.
   creation and removal, the refusal to drop uncommitted work, inventory and the
   picker. It covers the paths that have broken silently before; it does not
   cover the docker or gh paths, which need both installed and configured.
-- **Not packaged.** Clone and `./install.sh`; there is no Homebrew formula.
+- **Not packaged.** Install with `get.sh` or `./install.sh`; no Homebrew formula.
+- **It installs a tmux config.** If you already have one, siding's is written to
+  `~/.tmux.siding.conf` and you are told to `source-file` it — an installer
+  replacing a curated tmux.conf would be rude. It does replace its own.
 
 ## Notes
 

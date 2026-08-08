@@ -504,12 +504,6 @@ wsdir() {
   tmux new-session -A -s "$name" -c "$dir"
 }
 
-# Back-compat: the ax* names this started life with. The setup is not tied to
-# any one workspace any more, so ws* is the real vocabulary; these remain so
-# muscle memory and older notes keep working.
-alias ax=wsclaude   axnew=wsnew   axwip=wswip   axdone=wsdone
-alias axup=wsup     axdown=wsdown axstack=wsstack
-alias axconsole=wsconsole axlogs=wslogs axtask=wstask
 
 # wsdoctor — check the setup on this machine. Run it first whenever something
 # behaves oddly, and after installing on a new Mac.

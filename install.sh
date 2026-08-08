@@ -87,7 +87,19 @@ install_file "$SRC/siding-stackgen.py" "$HOME/.siding-stackgen.py"
 install_file "$SRC/siding-copy" "$HOME/.siding-copy"
 chmod +x "$HOME/.siding-copy"
 chmod +x "$HOME/.siding-stackgen.py"
-install_file "$SRC/tmux.conf"      "$HOME/.tmux.conf"
+# Do not clobber a tmux config someone else wrote. Ours carries a marker; if
+# what is there lacks it, install alongside and let them include it — a curated
+# tmux.conf is exactly the kind of thing an installer has no business replacing.
+if [ ! -e "$HOME/.tmux.conf" ] || grep -q 'siding:managed' "$HOME/.tmux.conf" 2>/dev/null; then
+  install_file "$SRC/tmux.conf" "$HOME/.tmux.conf"
+else
+  install_file "$SRC/tmux.conf" "$HOME/.tmux.siding.conf"
+  if grep -q 'tmux.siding.conf' "$HOME/.tmux.conf" 2>/dev/null; then
+    say "your ~/.tmux.conf already sources ~/.tmux.siding.conf"
+  else
+    TMUX_MANUAL=1
+  fi
+fi
 install_file "$SRC/ghostty-config" "$HOME/.config/ghostty/config"
 say "installed tmux.conf, ghostty config and the siding-* scripts"
 
@@ -105,6 +117,12 @@ else
 fi
 
 [ "$backed_up" -eq 1 ] && say "replaced files backed up to $BACKUP"
+if [ "${TMUX_MANUAL:-0}" -eq 1 ]; then
+  echo
+  say "you already have a ~/.tmux.conf, so siding's went to ~/.tmux.siding.conf"
+  say "add this line to yours to use it:"
+  say "    source-file ~/.tmux.siding.conf"
+fi
 
 echo
 echo "done. open Ghostty, then press ⌥r"
