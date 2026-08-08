@@ -297,7 +297,8 @@ scripts themselves), and backs up what it touched.
 | | |
 |---|---|
 | `~/.siding.env` | **the only per-machine file** — `WS_ROOT`, `WS_NAME` |
-| `~/.siding-wt.zsh` | the `ws*` commands, sourced from `~/.zshrc` |
+| `~/.siding-wt.zsh` | the commands, sourced from `~/.zshrc` |
+| `~/.siding-stack.zsh` | the docker-compose half, sourced by the above |
 | `~/.siding-pick.zsh` | the picker |
 | `~/.siding-open.zsh` | opens a window: agent left, shell right |
 | `~/.siding-newtask.zsh` | creates a worktree and its window |
