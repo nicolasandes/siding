@@ -17,8 +17,17 @@ personal, each its own tmux session.
 
 ## Install
 
+Just using it — no clone needed. `install.sh` copies into `$HOME`, so nothing
+reads from a checkout at runtime:
+
 ```sh
-git clone <this repo> ~/dev/siding
+curl -fsSL https://raw.githubusercontent.com/nicolasandes/siding/main/get.sh | sh
+```
+
+Working on it, or if you would rather see what you are running first:
+
+```sh
+git clone https://github.com/nicolasandes/siding.git ~/dev/siding
 cd ~/dev/siding
 ./install.sh                        # guesses ~/dev, ~/code, ~/projects, ~/src
 WS_ROOT=~/code ./install.sh         # or say where
