@@ -9,11 +9,30 @@
 
 # Per-machine settings. Profiles first (one workspace + identity each), falling
 # back to the single-workspace file from before profiles existed.
-if [[ -d "$HOME/.siding/profiles" ]]; then
-  _sd=$([[ -f "$HOME/.siding/default" ]] && cat "$HOME/.siding/default" || print -r -- work)
-  [[ -f "$HOME/.siding/profiles/$_sd.env" ]] && { source "$HOME/.siding/profiles/$_sd.env"; export SIDING_PROFILE=$_sd }
+if [[ -d "$HOME/.siding/profiles" && -z "${SIDING_NO_PROFILE:-}" ]]; then
+  # Which workspace this shell belongs to. The tmux session knows — sidingws
+  # records it — and that must win, because tmux propagates the environment of
+  # whichever session started the server: a pane in the work session inherits
+  # WS_ROOT from personal, and the profile's own ${WS_ROOT:-…} then politely
+  # keeps the inherited value. That is how the picker showed the wrong repos.
+  _sd=""
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    _sd=$(command tmux display-message -p -t "$TMUX_PANE" '#{@profile}' 2>/dev/null)
+  elif [[ -n "${TMUX:-}" ]]; then
+    _sd=$(command tmux display-message -p '#{@profile}' 2>/dev/null)
+  fi
+  [[ -n "$_sd" && -f "$HOME/.siding/profiles/$_sd.env" ]] || \
+    _sd=$([[ -f "$HOME/.siding/last" ]] && cat "$HOME/.siding/last" \
+          || { [[ -f "$HOME/.siding/default" ]] && cat "$HOME/.siding/default" || print -r -- work; })
+  if [[ -f "$HOME/.siding/profiles/$_sd.env" ]]; then
+    # Clear first: a resolved profile describes the workspace, and an inherited
+    # value must not override it.
+    unset WS_ROOT WS_NAME WS_GH WS_EMAIL WS_SSH_HOST
+    source "$HOME/.siding/profiles/$_sd.env"
+    export SIDING_PROFILE=$_sd
+  fi
   unset _sd
-elif [[ -f "$HOME/.siding.env" ]]; then
+elif [[ -f "$HOME/.siding.env" && -z "${SIDING_NO_PROFILE:-}" ]]; then
   source "$HOME/.siding.env"
 fi
 export WS_ROOT="${WS_ROOT:-$HOME/dev}"
@@ -313,8 +332,25 @@ _siding_profile_for_path() {
   return 1
 }
 
-# Where you are, then what you used last, then the recorded default.
+# Which workspace am I looking at? The tmux session knows — sidingws records it
+# — and that beats guessing from a directory. The picker runs in a popup, whose
+# working directory is NOT the pane's unless told, so inferring from the path
+# there showed one workspace's repos while you were sitting in another.
+#
+# Note this answers a different question from "which workspace am I operating
+# on", which is a path question — see sidinginventory, which adopts by path.
 _siding_default() {
+  # Ask about a specific pane when we know one: $TMUX is unset in some contexts
+  # (run-shell, popups) where $TMUX_PANE is still set, and without a target tmux
+  # answers about whichever session it considers current — which is how the work
+  # session kept resolving to the personal profile.
+  local sess
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    sess=$(tmux display-message -p -t "$TMUX_PANE" '#{@profile}' 2>/dev/null)
+  elif [[ -n "${TMUX:-}" ]]; then
+    sess=$(tmux display-message -p '#{@profile}' 2>/dev/null)
+  fi
+  [[ -n "$sess" && -f "$(_siding_profdir)/$sess.env" ]] && { print -r -- "$sess"; return }
   local bypath; bypath=$(_siding_profile_for_path 2>/dev/null) && { print -r -- "$bypath"; return }
   [[ -f "$(_siding_dir)/last" ]] && { cat "$(_siding_dir)/last"; return }
   [[ -f "$(_siding_dir)/default" ]] && { cat "$(_siding_dir)/default"; return }
@@ -378,6 +414,7 @@ sidingws() {
     fi
     tmux set-option -t "$WS_NAME" @gh "${WS_GH:-?}" 2>/dev/null
     tmux set-option -t "$WS_NAME" @profile "$name" 2>/dev/null
+    _siding_export_session_env "$WS_NAME" "$name"
     tmux switch-client -t "$WS_NAME"
     return
   fi
@@ -403,9 +440,24 @@ sidingws() {
     fi
   fi
 
-  tmux new-session -A -s "$WS_NAME" -n home -c "$WS_ROOT" "$HOME/.siding-home.zsh" \; \
-       set -t "$WS_NAME" @gh "${WS_GH:-?}" \; \
-       set -t "$WS_NAME" @profile "$name"
+  tmux new-session -d -A -s "$WS_NAME" -n home -c "$WS_ROOT" "$HOME/.siding-home.zsh" 2>/dev/null
+  tmux set-option -t "$WS_NAME" @gh "${WS_GH:-?}" 2>/dev/null
+  tmux set-option -t "$WS_NAME" @profile "$name" 2>/dev/null
+  _siding_export_session_env "$WS_NAME" "$name"
+  tmux attach-session -t "$WS_NAME"
+}
+
+# Put the workspace into the tmux SESSION environment, so every pane and popup
+# opened in it inherits the right values. tmux otherwise propagates the
+# environment of whichever session started the server — which is how a pane in
+# one workspace ended up carrying another workspace's WS_ROOT, and the picker
+# listed the wrong repos.
+_siding_export_session_env() {
+  local sess=$1 prof=$2 v
+  for v in WS_ROOT WS_NAME WS_GH WS_EMAIL WS_SSH_HOST; do
+    tmux set-environment -t "$sess" "$v" "${(P)v}" 2>/dev/null
+  done
+  tmux set-environment -t "$sess" SIDING_PROFILE "$prof" 2>/dev/null
 }
 
 # Identity check for one repo: does what git will actually DO here match the

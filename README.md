@@ -153,7 +153,9 @@ A **profile** is a workspace root plus the GitHub identity that belongs to it.
 Add as many as you have identities — work, personal, a client, an org you
 contribute to. Each gets its own tmux session.
 
-Ghostty opens **whichever workspace you used last**, so it resumes rather than
+Two workspaces can be open at once — each is its own tmux session, and each pane
+in it carries that workspace's identity. Ghostty opens **whichever workspace you
+used last**, so it resumes rather than
 always landing in a fixed default. `⌥p` switches, and a second Ghostty window on
 the same workspace gets a *grouped* session — same windows available, but each
 window can sit on a different one instead of mirroring.

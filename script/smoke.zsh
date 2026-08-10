@@ -50,14 +50,32 @@ git clone -q "$WS/origin.git" "$WS/projects/demo"
 git -C "$WS/projects/demo" config user.email smoke@example.com
 git -C "$WS/projects/demo" config user.name Smoke
 
-# Point siding at the sandbox. Exported BEFORE sourcing on purpose: a profile
-# that overwrites a caller-supplied WS_ROOT is a bug this once had, and it made
-# the picker list an entirely different workspace's repos.
+# Point siding at the sandbox. SIDING_NO_PROFILE keeps the loader from resolving
+# a real profile over the top: a resolved profile MUST beat an inherited
+# environment — tmux propagates the environment of whichever session started the
+# server, so without that a pane in one workspace carried another's WS_ROOT and
+# the picker listed the wrong repos — but a test needs to opt out.
+export SIDING_NO_PROFILE=1
 export WS_ROOT="$WS" WS_NAME=smoke WS_GH="" WS_EMAIL="" WS_SSH_HOST=""
 export SIDING_WORKTREES="$WS/.siding/worktrees"
 source "$HOME/.siding-wt.zsh"
 
-is "profile load leaves an explicit WS_ROOT alone" "$WS_ROOT" "$WS"
+is "an explicit workspace survives loading (SIDING_NO_PROFILE)" "$WS_ROOT" "$WS"
+
+# The other half of that contract: without the opt-out, a resolved profile wins
+# over whatever the environment happened to carry in.
+prof_dir="$HOME/.siding/profiles"
+if [[ -d "$prof_dir" ]]; then
+  first=$(ls -1 "$prof_dir"/*.env 2>/dev/null | head -1)
+  if [[ -n "$first" ]]; then
+    real=$( unset WS_ROOT; source "$first" >/dev/null 2>&1; print -r -- "$WS_ROOT" )
+    got=$( WS_ROOT=/tmp/decoy SIDING_PROFILE= zsh -c "
+             unset SIDING_NO_PROFILE
+             printf '%s' \"\$(source $HOME/.siding-wt.zsh >/dev/null 2>&1; print -r -- \$WS_ROOT)\"" )
+    [[ "$got" != "/tmp/decoy" ]] && ok "a resolved profile beats an inherited workspace" \
+      || bad "a resolved profile beats an inherited workspace" "kept the decoy"
+  fi
+fi
 
 # ── discovery ────────────────────────────────────────────────────────────────
 dirs=$(_ws_repodirs)
